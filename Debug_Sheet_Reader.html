@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sheet Debugger — Vishwanath</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+body{background:#080e1c;color:#f0f4ff;font-family:monospace;padding:20px;font-size:13px}
+h2{color:#06b6d4;margin:20px 0 10px}
+h3{color:#f59e0b;margin:15px 0 5px}
+button{background:#3b82f6;border:none;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;cursor:pointer;margin:5px}
+.cell{background:#0f1929;border:1px solid #1c2e47;border-radius:6px;padding:8px 12px;margin:3px 0;display:flex;justify-content:space-between}
+.range{color:#8099b8;font-size:11px}
+.val{color:#10b981;font-weight:bold}
+.val.zero{color:#ef4444}
+.val.empty{color:#4a6080;font-style:italic}
+.error{color:#ef4444;background:#1a0a0a;padding:10px;border-radius:6px;margin:5px 0}
+.section{background:#0f1929;border:1px solid #1c2e47;border-radius:10px;padding:15px;margin-bottom:15px}
+pre{white-space:pre-wrap;word-break:break-all;color:#8099b8;font-size:11px;max-height:150px;overflow-y:auto}
+#status{padding:10px;border-radius:6px;margin:10px 0;font-weight:bold}
+.ok{background:rgba(16,185,129,.15);color:#10b981}
+.err{background:rgba(239,68,68,.15);color:#ef4444}
+</style>
+</head>
+<body>
+
+<h2>🔍 Sheet Debug Tool</h2>
+<p style="color:#8099b8;margin-bottom:15px">This tool shows exactly what data your app reads from each cell in your Google Sheet.</p>
+
+<button onclick="signIn()">🔑 Sign in with Google</button>
+<button onclick="runDebug()" id="debugBtn" style="display:none;background:#10b981">▶ Run Debug Read</button>
+
+<div id="status"></div>
+<div id="output"></div>
+
+<script>
+const CLIENT_ID = '536749131004-b121j7dgr25lg386mtolrqh7l6pj5ves.apps.googleusercontent.com';
+const SHEET_ID  = '1Rx-4SBKnxrS9V95jS0Ota1OVRmM5oGOwIMjaUfOjuwI';
+const SCOPES    = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+let token = null;
+
+function signIn() {
+  const c = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID, scope: SCOPES,
+    callback: res => {
+      if (res.error) { setStatus('Sign in failed: '+res.error, false); return; }
+      token = res.access_token;
+      setStatus('✓ Signed in! Click Run Debug Read', true);
+      document.getElementById('debugBtn').style.display='inline-block';
+    }
+  });
+  c.requestAccessToken();
+}
+
+async function GET(range) {
+  const r = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}`,
+    { headers: { Authorization: 'Bearer '+token } }
+  );
+  const json = await r.json();
+  if (!r.ok) throw new Error(`${range} → HTTP ${r.status}: ${json.error?.message||'unknown'}`);
+  return json.values || [];
+}
+
+function setStatus(msg, ok) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = ok ? 'ok' : 'err';
+}
+
+function cell(range, values) {
+  const flat = values.flat();
+  const val = flat[0];
+  const display = val === undefined ? '(empty)' : val;
+  const cls = val === undefined ? 'empty' : (+val === 0 ? 'zero' : '');
+  return `<div class="cell"><span class="range">${range}</span><span class="val ${cls}">${display}</span></div>`;
+}
+
+function table(range, values) {
+  if (!values.length) return `<div class="cell"><span class="range">${range}</span><span class="val empty">(no data)</span></div>`;
+  return `<div style="margin:5px 0"><div class="range" style="margin-bottom:4px">${range} — ${values.length} rows</div><pre>${values.map((r,i)=>`Row ${i}: [${r.join(' | ')}]`).join('\n')}</pre></div>`;
+}
+
+async function runDebug() {
+  setStatus('Reading sheet...', true);
+  document.getElementById('output').innerHTML = '<p style="color:#8099b8">Loading...</p>';
+  const out = [];
+
+  try {
+    // ── DASHBOARD TAB ──
+    out.push('<div class="section"><h3>📊 Dashboard Tab</h3>');
+    try {
+      const [sbi, hdfc, totalSav, wldD, cryD, fdD, rdD, pfD, ccD, totalInv, totalNW] = await Promise.all([
+        GET("Dashboard!C9"), GET("Dashboard!C10"), GET("Dashboard!E11"),
+        GET("Dashboard!C15"), GET("Dashboard!C16"), GET("Dashboard!C17"),
+        GET("Dashboard!C18"), GET("Dashboard!C19"), GET("Dashboard!C24"),
+        GET("Dashboard!C20"), GET("Dashboard!C33")
+      ]);
+      out.push(cell("Dashboard!C9 (SBI Closing)", sbi));
+      out.push(cell("Dashboard!C10 (HDFC Closing)", hdfc));
+      out.push(cell("Dashboard!E11 (Total Savings)", totalSav));
+      out.push(cell("Dashboard!C15 (WLD Value)", wldD));
+      out.push(cell("Dashboard!C16 (CoinDCX Cryptos)", cryD));
+      out.push(cell("Dashboard!C17 (FD)", fdD));
+      out.push(cell("Dashboard!C18 (RD)", rdD));
+      out.push(cell("Dashboard!C19 (PF)", pfD));
+      out.push(cell("Dashboard!C20 (Total Investments)", totalInv));
+      out.push(cell("Dashboard!C24 (CC Spent)", ccD));
+      out.push(cell("Dashboard!C33 (Total Net Worth)", totalNW));
+    } catch(e) { out.push(`<div class="error">Dashboard error: ${e.message}</div>`); }
+    out.push('</div>');
+
+    // ── MONTHLY LOG TAB ──
+    out.push('<div class="section"><h3>📅 Monthly Log Tab</h3>');
+    try {
+      const monthly = await GET("Monthly Log!B5:K6"); // Just first 2 rows
+      out.push(table("Monthly Log!B5:K6 (first 2 data rows)", monthly));
+    } catch(e) { out.push(`<div class="error">Monthly Log error: ${e.message}</div>`); }
+    out.push('</div>');
+
+    // ── INVESTMENTS TAB ──
+    out.push('<div class="section"><h3>📈 Investments Tab</h3>');
+    try {
+      const [wldRow, wldTot14, cryRow, cryTot25, fdRow, fdTot36, rdRow, rdTot54, pfRow, pfTot65] = await Promise.all([
+        GET("Investments!B6:F6"),
+        GET("Investments!E14"),
+        GET("Investments!B17:F17"),
+        GET("Investments!E25"),
+        GET("Investments!B28:E28"),
+        GET("Investments!E36"),
+        GET("Investments!B39:E39"),
+        GET("Investments!E54"),
+        GET("Investments!B57:G57"),
+        GET("Investments!G65")
+      ]);
+      out.push(table("Investments!B6:F6 (WLD row 6)", wldRow));
+      out.push(cell("Investments!E14 (WLD TOTAL)", wldTot14));
+      out.push(table("Investments!B17:F17 (Crypto row 17 - Binance)", cryRow));
+      out.push(cell("Investments!E25 (Crypto TOTAL)", cryTot25));
+      out.push(table("Investments!B28:E28 (FD row 28)", fdRow));
+      out.push(cell("Investments!E36 (FD TOTAL)", fdTot36));
+      out.push(table("Investments!B39:E39 (RD row 39)", rdRow));
+      out.push(cell("Investments!E54 (RD TOTAL)", rdTot54));
+      out.push(table("Investments!B57:G57 (PF row 57)", pfRow));
+      out.push(cell("Investments!G65 (PF Running TOTAL)", pfTot65));
+    } catch(e) { out.push(`<div class="error">Investments error: ${e.message}</div>`); }
+    out.push('</div>');
+
+    // ── CC EXPENSES TAB ──
+    out.push('<div class="section"><h3>💳 CC Expenses Tab</h3>');
+    try {
+      const ccRows = await GET("CC Expenses!A1:F3");
+      out.push(table("CC Expenses!A1:F3 (first 3 rows incl header)", ccRows));
+    } catch(e) { out.push(`<div class="error">CC Expenses error: ${e.message}</div>`); }
+    out.push('</div>');
+
+    setStatus('✓ Debug complete! Share this with Claude to fix the app.', true);
+  } catch(e) {
+    setStatus('Error: '+e.message, false);
+  }
+
+  document.getElementById('output').innerHTML = out.join('');
+}
+</script>
+</body>
+</html>
