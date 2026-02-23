@@ -285,9 +285,10 @@ const CLIENT_ID = '536749131004-b121j7dgr25lg386mtolrqh7l6pj5ves.apps.googleuser
 const SHEET_ID  = '1Rx-4SBKnxrS9V95jS0Ota1OVRmM5oGOwIMjaUfOjuwI';
 const SCOPES    = 'https://www.googleapis.com/auth/spreadsheets';
 const SH = {
-  monthly:'📅 Monthly Log',
-  invest: '📈 Investments',
-  cc:     '💳 CC Expenses'
+  dash:    'Dashboard',
+  monthly: 'Monthly Log',
+  invest:  'Investments',
+  cc:      'CC Expenses'
 };
 const MONTH_ORDER=['Feb 2026','Mar 2026','Apr 2026','May 2026','Jun 2026','Jul 2026','Aug 2026','Sep 2026','Oct 2026','Nov 2026','Dec 2026','Jan 2027'];
 
@@ -349,6 +350,8 @@ function setST(msg,cls){ const e=document.getElementById('st'); e.textContent=ms
 
 // ── LOAD ──
 async function loadMonthly() {
+  // Monthly Log: Row 4=header, rows 5-16 = Feb2026-Jan2027
+  // Cols: B=Month, C=Salary, D=SBIOpen, E=SBIClose, F=HDFCOpen, G=HDFCClose, H=TotalExpense, I=CCSpent, J=TotalInvested, K=NetWorth
   const rows = await GET(`${SH.monthly}!B5:K16`);
   D.monthly = rows.filter(r=>r[0]).map((r,i)=>({
     row:5+i, month:r[0]||'', salary:+r[1]||0, sbiOpen:+r[2]||0, sbiClose:+r[3]||0,
@@ -358,31 +361,38 @@ async function loadMonthly() {
 }
 
 async function loadInvest() {
-  const [wld,cry,fd,rd,pf] = await Promise.all([
+  // Investments sheet:
+  // WLD: rows 6+ in cols B(date),C(tokens),D(rate),E(value),F(notes). Total in E14
+  // Crypto: rows 17-24 in cols B(date),C(coin),D(invested),E(current),F(pl). Total in E25
+  // FD: rows 28+ in cols B(date),C(amount),D(rate%),E(maturity date). Total in E36
+  // RD: rows 39+ in cols B(date),C(monthly),D(remaining),E(deposited),F(interest). Total in E54
+  // PF: rows 57+ in cols B(month),C(emp),D(employer),E(total),F(company),G(running). Total in E65
+  const [wld, cry, fd, rd, pf] = await Promise.all([
     GET(`${SH.invest}!B6:F13`),
-    GET(`${SH.invest}!C17:G24`),
-    GET(`${SH.invest}!B28:F35`),
-    GET(`${SH.invest}!B39:G53`),
+    GET(`${SH.invest}!B17:F24`),
+    GET(`${SH.invest}!B28:E35`),
+    GET(`${SH.invest}!B39:E53`),
     GET(`${SH.invest}!B57:G64`)
   ]);
-  D.wld    = wld.filter(r=>r[0]).map(r=>({date:r[0],tokens:+r[1]||0,rate:+r[2]||0,value:+r[3]||0,notes:r[4]||''}));
-  D.crypto = cry.filter(r=>r[0]).map(r=>({coin:r[0],invested:+r[1]||0,current:+r[2]||0,pl:+r[3]||0}));
+  D.wld    = wld.filter(r=>r[0]&&r[4]).map(r=>({date:r[0],tokens:+r[1]||0,rate:+r[2]||0,value:+r[3]||0,notes:r[4]||''}));
+  D.crypto = cry.filter(r=>r[1]).map(r=>({date:r[0],coin:r[1]||'',invested:+r[2]||0,current:+r[3]||0,pl:+r[4]||0}));
   D.fd     = fd.filter(r=>r[0]).map(r=>({date:r[0],amount:+r[1]||0,rate:r[2]||'',maturity:r[3]||''}));
   D.rd     = rd.filter(r=>r[0]).map(r=>({date:r[0],monthly:+r[1]||0,remaining:+r[2]||0,deposited:+r[3]||0}));
   D.pf     = pf.filter(r=>r[0]).map(r=>({month:r[0],emp:+r[1]||0,er:+r[2]||0,total:+r[3]||0,co:r[4]||'',running:+r[5]||0}));
 }
 
 async function loadCC() {
-  const rows = await GET(`${SH.cc}!B20:G500`);
-  D.cc = rows.filter(r=>r[0]&&r[3]).map(r=>({date:r[0],desc:r[1]||'',cat:r[2]||'Other',amount:+r[3]||0,pay:r[4]||'',month:r[5]||''}));
+  // CC Expenses sheet - read from row 2 onwards
+  const rows = await GET(`${SH.cc}!A2:F500`);
+  D.cc = rows.filter(r=>r[0]&&r[2]).map(r=>({date:r[0],desc:r[1]||'',cat:r[2]||'Other',amount:+r[3]||0,pay:r[4]||'',month:r[5]||''}));
 }
 
 // ── CALC ──
 const fmt=n=>'₹'+Math.abs(Math.round(n)).toLocaleString('en-IN');
-const tWLD   =()=>D.wld.reduce((s,e)=>s+e.value,0);
+const tWLD   =()=>{ const last=D.wld.slice(-1)[0]; return last?last.value:0; };
 const tCrypto=()=>D.crypto.reduce((s,e)=>s+e.current,0);
 const tFD    =()=>D.fd.reduce((s,e)=>s+e.amount,0);
-const tRD    =()=>D.rd.reduce((s,e)=>s+e.deposited,0);
+const tRD    =()=>{ const last=D.rd[0]; return last?last.deposited:0; };
 const tPF    =()=>D.pf.length?D.pf[D.pf.length-1].running:0;
 const tInv   =()=>tWLD()+tCrypto()+tFD()+tRD()+tPF();
 const tCC    =()=>D.cc.reduce((s,e)=>s+e.amount,0);
@@ -394,15 +404,20 @@ function renderAll(){ renderDash(); renderMonths(); renderInvSum(); renderCC(); 
 
 function renderDash(){
   const lat=latest(), fst=first();
-  const bank=lat?lat.sbiClose+lat.hdfcClose:0;
-  const nw=bank+tInv(), nwF=fst?fst.sbiClose+fst.hdfcClose+tInv():0, grow=nw-nwF;
+  // Use latest month's SBI close (col E=index 3) and HDFC close (col G=index 5)
+  const sbi=lat?lat.sbiClose:0;
+  const hdfc=lat?lat.hdfcClose:0;
+  const bank=sbi+hdfc;
+  const nw=bank+tInv();
+  const nwF=fst?(fst.sbiClose+fst.hdfcClose+tInv()):0;
+  const grow=nw-nwF;
   set('d-nw',fmt(nw)); set('d-bank',fmt(bank)); set('d-inv',fmt(tInv())); set('d-cc',fmt(tCC()));
-  set('d-sbi',lat?fmt(lat.sbiClose):'₹0'); set('d-hdfc',lat?fmt(lat.hdfcClose):'₹0');
+  set('d-sbi',fmt(sbi)); set('d-hdfc',fmt(hdfc));
   set('d-sal',lat?fmt(lat.salary):'₹0'); set('d-exp',lat?fmt(Math.max(0,lat.expense)):'₹0');
   set('d-wld',fmt(tWLD())); set('d-cry',fmt(tCrypto())); set('d-fd',fmt(tFD())); set('d-rd',fmt(tRD())); set('d-pf',fmt(tPF()));
   set('d-nws',fmt(nwF)); set('d-nwn',fmt(nw));
   const ge=document.getElementById('d-grw');
-  ge.textContent=(grow>=0?'+':'-')+fmt(grow); ge.className='rval '+(grow>=0?'green':'red');
+  ge.textContent=(grow>=0?'+':'-')+fmt(Math.abs(grow)); ge.className='rval '+(grow>=0?'green':'red');
   const b=document.getElementById('badge');
   if(grow>0) b.innerHTML='<div class="badge bg">💪 NET WORTH GROWING</div>';
   else if(grow<0) b.innerHTML='<div class="badge br">📉 NET WORTH LOSING</div>';
@@ -469,6 +484,7 @@ async function saveMonth(){
   const mo=document.getElementById('m-mo').value;
   const idx=MONTH_ORDER.indexOf(mo); if(idx<0)return;
   const row=5+idx;
+  // Monthly Log columns: B=Month, C=Salary, D=SBIOpen(auto), E=SBIClose, F=HDFCOpen(auto), G=HDFCClose
   const sal=document.getElementById('m-sal').value||'';
   const sbi=document.getElementById('m-sbi').value||'';
   const hdfc=document.getElementById('m-hdfc').value||'';
@@ -489,16 +505,20 @@ async function saveWLD(){
   const val=(+t*+r).toFixed(2);
   const today=new Date().toLocaleDateString('en-GB').split('/').join('-');
   toast('Saving...','');
+  // WLD table starts at row 5 (header), data from row 6. Cols B-F: Date,Tokens,Rate,Value,Notes
   try{ await APPEND(`${SH.invest}!B6:F6`,[[today,t,r,val,n]]); await syncAll(); toast('WLD saved ✓','success'); ['i-wt','i-wr','i-wn'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
 }
 
 async function saveCrypto(){
   const coin=document.getElementById('i-coin').value,inv=document.getElementById('i-ci').value,cur=document.getElementById('i-cv').value;
   if(!inv||!cur){toast('Enter values!','error');return;}
+  // Crypto rows 17-24: B=Date, C=Coin, D=AmountInvested, E=CurrentValue, F=PL
   const coinOrder=['Binance coin','Ripple','Doge','Shiba Inu','Bitcoin','Pepe','Bonk','X Empire'];
   const idx=coinOrder.indexOf(coin); if(idx<0)return;
+  const row=17+idx;
+  const today=new Date().toLocaleDateString('en-GB').split('/').join('-');
   toast('Updating...','');
-  try{ await PUT(`${SH.invest}!D${17+idx}:E${17+idx}`,[[inv,cur]]); await syncAll(); toast(coin+' updated ✓','success'); ['i-ci','i-cv'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
+  try{ await PUT(`${SH.invest}!B${row}:E${row}`,[[today,coin,inv,cur]]); await syncAll(); toast(coin+' updated ✓','success'); ['i-ci','i-cv'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
 }
 
 async function saveFD(){
@@ -506,7 +526,8 @@ async function saveFD(){
   if(!a){toast('Enter FD amount!','error');return;}
   const today=new Date().toLocaleDateString('en-GB').split('/').join('-');
   toast('Saving...','');
-  try{ await APPEND(`${SH.invest}!B28:F28`,[[today,a,(+r/100).toFixed(3),m,'']]); await syncAll(); toast('FD saved ✓','success'); ['i-fa','i-fm'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
+  // FD rows from 28: B=Date, C=Amount, D=Rate%, E=MaturityDate
+  try{ await APPEND(`${SH.invest}!B28:E28`,[[today,a,r+'%',m]]); await syncAll(); toast('FD saved ✓','success'); ['i-fa','i-fm'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
 }
 
 async function saveRD(){
@@ -514,7 +535,8 @@ async function saveRD(){
   if(!a){toast('Enter RD amount!','error');return;}
   const today=new Date().toLocaleDateString('en-GB').split('/').join('-');
   toast('Saving...','');
-  try{ await APPEND(`${SH.invest}!B39:G39`,[[today,a,'',t,'0.075','']]); await syncAll(); toast('RD saved ✓','success'); ['i-ra','i-rd'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
+  // RD rows from 39: B=Date, C=MonthlyAmount, D=MonthsRemaining, E=TotalDeposited, F=Interest%
+  try{ await APPEND(`${SH.invest}!B39:F39`,[[today,a,t,a,'7.50%']]); await syncAll(); toast('RD saved ✓','success'); ['i-ra','i-rd'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
 }
 
 async function savePF(){
@@ -522,6 +544,7 @@ async function savePF(){
   if(!mo||!e){toast('Enter month and PF!','error');return;}
   const tot=(+e||0)+(+r||0);
   toast('Saving...','');
+  // PF rows from 57: B=Month, C=EmpPF, D=ErPF, E=Total, F=Company, G=RunningTotal
   try{ await APPEND(`${SH.invest}!B57:G57`,[[mo,e,r,tot,'Ericsson (Genius Consultants)',run]]); await syncAll(); toast('PF saved ✓','success'); ['i-pm','i-pe','i-pr','i-pt'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
 }
 
@@ -530,7 +553,8 @@ async function saveExpense(){
   if(!a||!desc||!d){toast('Fill all fields!','error');return;}
   const mo=new Date(d).toLocaleString('en-IN',{month:'short',year:'numeric'}).replace(' ','-');
   toast('Saving...','');
-  try{ await APPEND(`${SH.cc}!B20:G20`,[[d,desc,cat,a,'Credit Card',mo]]); await syncAll(); toast('Expense saved ✓','success'); ['cc-a','cc-desc'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
+  // CC Expenses: A=Date, B=Description, C=Category, D=Amount, E=PaymentMethod, F=Month
+  try{ await APPEND(`${SH.cc}!A2:F2`,[[d,desc,cat,a,'Credit Card',mo]]); await syncAll(); toast('Expense saved ✓','success'); ['cc-a','cc-desc'].forEach(id=>document.getElementById(id).value=''); }catch(e){toast('Failed: '+e.message,'error');}
 }
 
 // ── UTILS ──
